@@ -1,0 +1,61 @@
+{
+  "interactionModel": {
+    "languageModel": {
+      "invocationName": "change me",
+      "intents": [
+        {
+          "name": "AMAZON.CancelIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.HelpIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.StopIntent",
+          "samples": []
+        },
+        {
+          "name": "AMAZON.NavigateHomeIntent",
+          "samples": []
+        },
+        {
+          "name": "NewCasesIntent",
+          "slots": [
+            {
+              "name": "State",
+              "type": "AMAZON.US_STATE"
+            },
+            {
+              "name": "City",
+              "type": "AMAZON.US_CITY"
+            }
+          ],
+          "samples": [
+            "any new cases",
+            "new strains {State}",
+            "new cases {State}",
+            "new strains near me",
+            "new strains {City}",
+            "new cases near me",
+            "new cases {City}"
+          ]
+        },
+        {
+          "name": "BestTimeIntent",
+          "slots": [
+            {
+              "name": "location",
+              "type": "AMAZON.PostalAddress"
+            }
+          ],
+          "samples": [
+            "best time {location}"
+          ]
+        }
+      ],
+      "types": []
+    }
+  },
+  "version": "3"
+}
