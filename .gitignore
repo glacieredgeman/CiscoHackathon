@@ -1,0 +1,5 @@
+*.json
+go.sum
+handler.zip
+canwegoyet
+.env
