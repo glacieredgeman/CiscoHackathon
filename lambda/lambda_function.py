@@ -14,6 +14,8 @@ from ask_sdk_core.handler_input import HandlerInput
 
 from ask_sdk_model import Response
 
+import requests as req
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
@@ -33,6 +35,29 @@ class LaunchRequestHandler(AbstractRequestHandler):
             handler_input.response_builder
                 .speak(speak_output)
                 .ask(speak_output)
+                .response
+        )
+
+
+class NewCasesIntentHandler(AbstractRequestHandler):
+    """Handler for New Cases Intent."""
+    def can_handle(self, handler_input):
+        # type: (HandlerInput) -> bool
+        return ask_utils.is_intent_name("NewCasesIntent")(handler_input)
+
+    def handle(self, handler_input):
+        # type: (HandlerInput) -> Response
+        
+        novelcovid = req.get("https://corona.lmao.ninja/v2/states").json()
+        # print(novelcovid.content)
+        logger.log(1, novelcovid[0]['state'] + novelcovid[0]['todayDeaths'])
+        speak_output = novelcovid[0]['state'] + ": " + novelcovid[0]['todayDeaths']
+        # speak_output = "Not sure yet!"
+
+        return (
+            handler_input.response_builder
+                .speak(speak_output)
+                # .ask("add a reprompt if you want to keep the session open for the user to respond")
                 .response
         )
 
