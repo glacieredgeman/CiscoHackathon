@@ -3,12 +3,14 @@ package main
 import (
 	"canwegoyet/alexa"
 	"canwegoyet/besttime"
+	"canwegoyet/covid"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"time"
 
 	"github.com/aws/aws-lambda-go/lambda"
@@ -21,6 +23,8 @@ var (
 	apiKeyPublic           string
 	bestTimeNewForecastUrl = "https://BestTime.app/api/v1/forecasts?"
 	bestTimeQuietHoursUrl  = "https://BestTime.app/api/v1/forecasts/quiet?"
+	covidCountyUrl         = "https://disease.sh/v3/covid-19/nyt/counties/"
+	layout                 = "03PM"
 )
 
 func Handler(request alexa.Request) (alexa.Response, error) {
@@ -60,18 +64,86 @@ func IntentDispatcher(request alexa.Request) alexa.Response {
 
 func HandleCurrentTimeIntent(request alexa.Request) alexa.Response {
 	var builder alexa.SSMLBuilder
+	var response string
 	weekday := int(time.Now().Weekday()) - 1
 	venueNameSlot := request.Body.Intent.Slots["VenueName"]
 	venueAddressSlot := request.Body.Intent.Slots["VenueAddress"]
-	response, err := CurrentDensity(venueNameSlot.Value, venueAddressSlot.Value, weekday)
+	county := request.Body.Intent.Slots["County"]
+	diff, err := CovidCounty(county.Value)
+	if err != nil {
+		response = "Error retrieving the covid county info at " + county.Value
+	}
+	response, density, quietHours, err := CurrentDensity(venueNameSlot.Value, venueAddressSlot.Value, weekday)
 	if err != nil {
 		response = "Error retrieving the current population density at " + venueNameSlot.Value
 	}
 	builder.Say(response)
+	builder.Pause("1000")
+	switch density {
+	case "Low", "Below average":
+		builder.Say("It is a good time to go at this hour.")
+	case "Average":
+		builder.Say("It is up to you to decide whether to go or not.")
+		nextBestTime := calcBestTime(quietHours)
+		if nextBestTime != -1 {
+			var hour string
+			if nextBestTime == 0 {
+				hour = "12AM"
+			} else if nextBestTime >= 12 {
+				hour = "12"
+				if nextBestTime > 12 {
+					hour = strconv.Itoa(nextBestTime - 12)
+				}
+				hour += "PM"
+			} else {
+				hour = strconv.Itoa(nextBestTime) + "AM"
+			}
+			builder.Say("Otherwise the next best hour to go is at " + hour)
+		}
+	case "Above average":
+		builder.Say("It is not a good time to go at this hour.")
+		nextBestTime := calcBestTime(quietHours)
+		if nextBestTime != -1 {
+			var hour string
+			if nextBestTime == 0 {
+				hour = "12AM"
+			} else if nextBestTime >= 12 {
+				hour = "12"
+				if nextBestTime > 12 {
+					hour = strconv.Itoa(nextBestTime - 12)
+				}
+				hour += "PM"
+			} else {
+				hour = strconv.Itoa(nextBestTime) + "AM"
+			}
+			builder.Say("The next best hour to go is at " + hour)
+		}
+	case "Closed":
+		builder.Say("The place is closed at this hour.")
+	}
+	builder.Pause("1000")
+	builder.Say(fmt.Sprintf("There has been %d new cases in the past 2 days.", diff))
 	return alexa.NewSSMLResponse("Current population density at a venue", builder.Build())
 }
 
-func CurrentDensity(venueName string, venueAddress string, weekday int) (string, error) {
+func calcBestTime(quietHours []int) int {
+	currHour := time.Now().Hour()
+	bestHour := -1
+	smallestDiff := 24
+	for _, quietHour := range quietHours {
+		if quietHour < currHour {
+			continue
+		}
+		diff := quietHour - currHour
+		if diff < smallestDiff {
+			smallestDiff = diff
+			bestHour = quietHour
+		}
+	}
+	return bestHour
+}
+
+func CurrentDensity(venueName string, venueAddress string, weekday int) (string, string, []int, error) {
 	currHour := time.Now().Hour()
 	// fmt.Println(currHour)
 	params := url.Values{
@@ -84,7 +156,7 @@ func CurrentDensity(venueName string, venueAddress string, weekday int) (string,
 	req, err := http.NewRequest("POST", url, nil)
 	if err != nil {
 		fmt.Println(err)
-		return "", err
+		return "", "", nil, err
 	}
 	response, err := client.Do(req)
 	defer response.Body.Close()
@@ -93,7 +165,7 @@ func CurrentDensity(venueName string, venueAddress string, weekday int) (string,
 	err = json.Unmarshal(body, &forecastResponse)
 	// fmt.Println(forecastResponse)
 	responseString := "The current population density at " + venueName + " is " + forecastResponse.Analysis[weekday].HourAnalysis[currHour].Intensity
-	return responseString, nil
+	return responseString, forecastResponse.Analysis[weekday].HourAnalysis[currHour].Intensity, forecastResponse.Analysis[weekday].QuietHours, nil
 }
 
 func GetVenueId(venueName string, venueAddress string) (string, error) {
@@ -125,7 +197,7 @@ func QuietHours(venueId string) (string, error) {
 	}
 	// fmt.Println("api_key_private = " + apiKeyPrivate)
 	url := bestTimeQuietHoursUrl + params.Encode()
-	fmt.Println(url)
+	// fmt.Println(url)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		fmt.Println(err)
@@ -134,14 +206,14 @@ func QuietHours(venueId string) (string, error) {
 	response, err := client.Do(req)
 	defer response.Body.Close()
 	body, err := ioutil.ReadAll(response.Body)
-	fmt.Println(string(body))
+	// fmt.Println(string(body))
 	var quietHoursResponse besttime.QuietHoursResponse
 	err = json.Unmarshal(body, &quietHoursResponse)
 	if err != nil {
 		fmt.Println("Error unmarshaling", err)
 		return "", err
 	}
-	fmt.Println(quietHoursResponse)
+	// fmt.Println(quietHoursResponse)
 	responseString := "The quiet hours are "
 	for _, hour := range quietHoursResponse.Analysis.QuietHoursList[:len(quietHoursResponse.Analysis.QuietHoursList)-1] {
 		responseString += hour + ", "
@@ -160,7 +232,7 @@ func HandleQuietHoursIntent(request alexa.Request) alexa.Response {
 		fmt.Println("Error retrieving venueId", err)
 		response = "Error retrieving the quiet hours at " + venueNameSlot.Value
 	}
-	fmt.Println("venueId = " + venueId)
+	// fmt.Println("venueId = " + venueId)
 	response, err = QuietHours(venueId)
 	if err != nil {
 		fmt.Println("Error retrieving quiet hours", err)
@@ -168,6 +240,27 @@ func HandleQuietHoursIntent(request alexa.Request) alexa.Response {
 	}
 	builder.Say(response)
 	return alexa.NewSSMLResponse("Quiet hours at a venue", builder.Build())
+}
+
+func CovidCounty(county string) (int, error) {
+	url := covidCountyUrl + county + "?lastdays=2"
+	// fmt.Println(url)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		fmt.Println(err)
+		return 0, err
+	}
+	response, err := client.Do(req)
+	defer response.Body.Close()
+	body, err := ioutil.ReadAll(response.Body)
+	var countyResponse []covid.CountyResponse
+	err = json.Unmarshal(body, &countyResponse)
+	if err != nil {
+		fmt.Println("Error unmarshaling", err)
+		return 0, err
+	}
+
+	return countyResponse[1].Cases - countyResponse[0].Cases, nil
 }
 
 func HandleHelpIntent(request alexa.Request) alexa.Response {

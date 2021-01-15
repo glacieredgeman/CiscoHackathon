@@ -14,6 +14,7 @@ type VenueInfo struct {
 
 type Day struct {
 	HourAnalysis []HourInfo `json:"hour_analysis"`
+	QuietHours   []int      `json:"quiet_hours"`
 }
 
 type HourInfo struct {
